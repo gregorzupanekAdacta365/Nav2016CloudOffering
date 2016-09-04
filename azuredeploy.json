@@ -1,0 +1,390 @@
+﻿{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 15,
+
+            "metadata": {
+                "Description": "Select the name of the Microsoft Dynamics NAV 2016 deployment. All resources will be named according to this (requirements: lower case chars and numbers, max 15 chars)."
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "West Europe",
+            "allowedValues": [
+                "West US",
+                "East US",
+                "North Central US",
+                "North Europe",
+                "West Europe",
+                "East Asia",
+                "Southeast Asia"
+            ],
+            "metadata": {
+                "Description": "Select Location in which to deploy Microsoft Dynamics NAV 2016"
+            }
+        },
+        "vmAdminUsername": {
+            "type": "string",
+            "defaultValue": "admin.nav",
+            "metadata": {
+                "Description": "Specify VM Admin user name"
+            }
+        },
+        "vmAdminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "Description": "Specify VM Admin Password"
+            }
+        },
+        "NAVCompany": {
+            "type": "string",
+            "defaultValue": "CRONUS Slovenija d.o.o.",
+            "allowedValues": [
+                "CRONUS Crna Gora d.o.o.",
+                "CRONUS Hrvatska d.o.o.",
+                "CRONUS Hungary Kft.",
+                "CRONUS International Ltd.",
+                "CRONUS Makedonija d.o.o.",
+                "CRONUS Slovenija d.o.o.",
+                "CRONUS Srbija d.o.o."
+            ],
+            "metadata": {
+                "Description": "Select Location in which to deploy Microsoft Dynamics NAV 2016"
+            }
+        },
+        "Office365Integration": {
+            "type": "string",
+            "defaultValue": "No",
+            "allowedValues": [
+                "Yes",
+                "No"
+            ],
+            "metadata": {
+                "Description": "Will Navision 2016 be integarted with Office 365 (authentication, sharepoint repository ...)"
+            }
+        },
+        "Office365UserName": {
+            "type": "string",
+            "defaultValue": "admin@adacta365.onmicrosoft.com",
+            "metadata": {
+                "Description": "Enter Office 365 Administrator Email (use Microsoft domain - no custom domain)"
+            }
+        },
+        "Office365Password": {
+            "type": "securestring",
+            "defaultValue": "___O365Password___",
+            "metadata": {
+                "Description": "Enter Office 365 Administrator Password"
+            }
+        },
+        "SQLDatabaseType": {
+            "type": "string",
+            "minLength": 1,
+            "defaultValue": "Local",
+            "allowedValues": [
+                "Local",
+                "NewAzureDB"
+            ],
+            "metadata": {
+                "description": "Local - Adacta DB will be installed on local SQL; NewAzureDB - Adacta DB will be moved to Azure SQL."
+            }
+        },
+        "ArtifactsSAS": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Shared Access Signature (passkey) to access artifacts in the cloud (DB, ps1 ...)"
+            }
+        }
+    },
+    "variables": {
+        "storageAccountType": "Standard_LRS",
+        "vmStorageAccountContainerName": "vhds",
+        "publicIPAddressName": "[concat(parameters('name'),'_PublicIP')]",
+        "newStorageAccountName": "[replace(tolower(parameters('name')),'-','')]",
+        "dnsName": "[replace(tolower(parameters('name')),'-','')]",
+        "subnetName": "[concat(parameters('name'),'_VNETSubnet')]",
+        "networkSecurityGroupName": "[concat(parameters('name'),'_NetSecurityGroup')]",
+        "virtualNetworkName": "[concat(parameters('name'),'_VNET')]",
+        "virtualNetworkAddress": "10.0.0.0/16",
+        "virtualNetworkSubnet": "10.0.100.0/24",
+        "server1Name": "[replace(tolower(parameters('name')),'-','')]",
+        "nic1Name": "[concat(tolower(parameters('name')),'_NIC')]",
+        "vnetID": "[resourceId('Microsoft.Network/virtualNetworks',variables('virtualNetworkName'))]",
+        "subnetRef": "[concat(variables('vnetID'),'/subnets/',variables('subnetName'))]",
+        "accountid": "[concat('/subscriptions/',subscription().subscriptionId,'/resourceGroups/',resourceGroup().name,'/providers/','Microsoft.Storage/storageAccounts/', variables('newStorageAccountName'))]",
+        "ScriptCommandToExecute": "powershell.exe -File  ",
+        "ScriptFilePath": "https://adacta365artifacts.blob.core.windows.net/deployment/",
+        "SharedAccessKey": "[parameters('ArtifactsSAS')]",
+        "vmSize": "Standard_A2",
+        "vmTimeZone": "Central Europe Standard Time",
+        "NAVCountry": "W1 - International",
+        "NAVCompany": "[parameters('NAVCompany')]",
+        "clickonce": "Yes",
+        "powerBI": "Yes",
+        "bingMapsKey": "No"     
+    },
+    "resources": [
+        {
+            "apiVersion": "2015-05-01-preview",
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('newStorageAccountName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Storage account"
+            },
+            "properties": {
+                "accountType": "[variables('storageAccountType')]"
+            }
+        },
+        {
+            "apiVersion": "2015-05-01-preview",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('publicIPAddressName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Public IP address"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "dnsSettings": {
+                    "domainNameLabel": "[variables('dnsName')]"
+                }
+            }
+        },
+        {
+            "apiVersion": "2015-05-01-preview",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[variables('networkSecurityGroupName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Network security group"
+            },
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "HTTP",
+                        "properties": {
+                            "description": "Http access",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "80",
+                            "destinationPortRange": "80",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 100,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "HTTPS",
+                        "properties": {
+                            "description": "Http access over Secure Socket Layer",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "443",
+                            "destinationPortRange": "443",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 200,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "Client",
+                        "properties": {
+                            "description": "Access for Windows Client",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "7046",
+                            "destinationPortRange": "7046",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 300,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "Soap",
+                        "properties": {
+                            "description": "Access to Soap Web Services",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "7047",
+                            "destinationPortRange": "7047",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 400,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "OData",
+                        "properties": {
+                            "description": "Access to OData Services",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "7048",
+                            "destinationPortRange": "7048",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 500,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "Help",
+                        "properties": {
+                            "description": "Access to Help Server",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "49000",
+                            "destinationPortRange": "49000",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 600,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2015-05-01-preview",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[variables('virtualNetworkName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Virtual network"
+            },
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('virtualNetworkAddress')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('subnetName')]",
+                        "properties": {
+                            "addressPrefix": "[variables('virtualNetworkSubnet')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2015-05-01-preview",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[variables('nic1Name')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]",
+                "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+            ],
+            "tags": {
+                "displayName": "Network interface"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]"
+                            },
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "2015-06-15",
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[variables('server1Name')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('newStorageAccountName'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', variables('nic1Name'))]"
+            ],
+            "tags": {
+                "displayName": "Virtual machine"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[variables('vmSize')]"
+                },
+                "osProfile": {
+                    "computername": "[variables('server1Name')]",
+                    "adminUsername": "[parameters('vmAdminUsername')]",
+                    "adminPassword": "[parameters('vmAdminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVmAgent": "true"
+                    }
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "MicrosoftDynamicsNAV",
+                        "offer": "DynamicsNAV",
+                        "sku": "2016",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "osdisk",
+                        "vhd": {
+                            "uri": "[concat('http://',variables('newStorageAccountName'),'.blob.core.windows.net/',variables('vmStorageAccountContainerName'),'/',variables('server1Name'),'.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic1Name'))]"
+                        }
+                    ]
+                }
+            },
+            "resources": [
+
+            ]
+        },
+        {
+            "apiVersion": "2015-06-15",
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(variables('server1Name'),'/InitializeNav2016')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Compute/virtualMachines/', variables('server1Name'))]"
+            ],
+            "tags": {
+                "displayName": "Custom script"
+            },
+            "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "CustomScriptExtension",
+                "typeHandlerVersion": "1.4",
+                "settings": {
+                    "fileUris": [
+                        "[concat(variables('ScriptFilePath'), 'InitializeNav2016Complete.ps1', '?', variables('SharedAccessKey'))]"
+                    ],
+                    "commandToExecute": "[concat(variables('ScriptCommandToExecute'),'InitializeNav2016Complete.ps1',' -VMAdminUsername ',parameters('vmAdminUsername'),' -VMAdminPassword ',parameters('vmAdminPassword'),' -VMTimeZone \"',variables('vmTimeZone'),'\" -VMLocation \"',parameters('Location'),'\" -NAVCountry \"',variables('NAVCountry'),'\" -NAVCompany \"',variables('NAVCompany'),'\" -PublicMachineName ',reference(variables('publicIPAddressName')).dnsSettings.fqdn,' -bingMapsKey ',variables('bingMapsKey'),' -ClickOnce ',variables('clickonce'),' -PowerBI ',variables('powerBI'),' -Office365Integration ',parameters('Office365Integration'),' -Office365UserName ',parameters('Office365UserName'),' -Office365Password ',parameters('Office365Password'),' -ArtifactsSAS \"',parameters('ArtifactsSAS'),'\"')]"
+                },
+                "protectedSettings": {
+                    "storageAccountName": "[variables('newStorageAccountName')]",
+                    "storageAccountKey": "[listKeys(variables('accountid'),'2015-06-15').key1]"
+                }
+            }
+        }
+
+    ]
+}
